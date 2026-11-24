@@ -82,6 +82,10 @@ class ProtocolTest(unittest.TestCase):
         self.assertIsNone(protocol.match_advertisement("Govee_H6102_1234"))
         self.assertIsNone(protocol.match_advertisement(None))
 
+    def test_captured_kelvin_tints(self) -> None:
+        self.assertEqual(protocol.kelvin_to_rgb(5900), (255, 243, 234))
+        self.assertEqual(protocol.kelvin_to_rgb(2900), (255, 182, 98))
+
     def test_out_of_range_values_rejected(self) -> None:
         with self.assertRaises(ValueError):
             protocol.brightness(101)

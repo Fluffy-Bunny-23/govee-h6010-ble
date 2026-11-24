@@ -61,4 +61,21 @@ python3 -m compileall -q custom_components tests
 python3 -m json.tool custom_components/govee_h6010_ble/manifest.json >/dev/null
 ```
 
-No Home Assistant installation is needed to run the protocol tests.
+No Home Assistant installation is needed for the protocol tests.
+
+`tests/ha_runtime_check.py` loads the real component under an installed Home
+Assistant (verified with 2026.11.3) and checks three things: the manifest and
+modules import cleanly, an `ihoment_H6010_*` advertisement produces a config
+entry through `async_step_bluetooth`, and the light entity emits the expected
+frames for power, brightness, RGB and color temperature. BLE transport is
+mocked there, so it does not prove a real radio or proxy connection.
+
+```sh
+python3 -m pip install homeassistant aiousbwatcher aiohasupervisor serialx habluetooth
+python3 tests/ha_runtime_check.py
+```
+
+Known limitation: an install has not been exercised against a live Home
+Assistant instance with a physical Bluetooth proxy. The BLE path uses Home
+Assistant's `async_ble_device_from_address`, which is the standard API for
+connectable remote adapters, but on-site verification is still worth doing.

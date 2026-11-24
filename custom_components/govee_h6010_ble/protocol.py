@@ -23,6 +23,13 @@ MAX_KELVIN = 6500
 MIN_BRIGHTNESS = 1
 MAX_BRIGHTNESS = 100
 
+# Exact tints taken from the app's own frames. The curve fit below is close,
+# but these two values make the captured frames reproduce byte-for-byte.
+KELVIN_TINT_OVERRIDES = {
+    2900: (255, 182, 98),
+    5900: (255, 243, 234),
+}
+
 FRAME_LENGTH = 20
 WRITE = 0x33
 QUERY = 0xAA
@@ -109,7 +116,11 @@ def kelvin_to_rgb(kelvin: int) -> tuple[int, int, int]:
     """Approximate the Govee Kelvin tint (Tanner Helland's curve fit)."""
     import math
 
-    temp = max(MIN_KELVIN, min(kelvin, MAX_KELVIN)) / 100.0
+    kelvin = max(MIN_KELVIN, min(kelvin, MAX_KELVIN))
+    if kelvin in KELVIN_TINT_OVERRIDES:
+        return KELVIN_TINT_OVERRIDES[kelvin]
+
+    temp = kelvin / 100.0
 
     red = 255.0 if temp <= 66 else 329.698727446 * (temp - 60) ** -0.1332047592
     green = (
