@@ -86,6 +86,24 @@ class ProtocolTest(unittest.TestCase):
         self.assertEqual(protocol.kelvin_to_rgb(5900), (255, 243, 234))
         self.assertEqual(protocol.kelvin_to_rgb(2900), (255, 182, 98))
 
+    def test_parse_status_replies_from_capture(self) -> None:
+        self.assertEqual(
+            protocol.parse_status(bytes.fromhex("aa010100000000000000000000000000000000aa")),
+            {"is_on": True},
+        )
+        self.assertEqual(
+            protocol.parse_status(bytes.fromhex("aa046400000000000000000000000000000000ca")),
+            {"brightness": 100},
+        )
+        self.assertEqual(
+            protocol.parse_status(bytes.fromhex("aa050dffb16d0bb8000000000000000000000032")),
+            {"kelvin": 3000},
+        )
+        self.assertEqual(
+            protocol.parse_status(bytes.fromhex("aa050dff00000000000000000000000000000000")),
+            None,
+        )
+
     def test_out_of_range_values_rejected(self) -> None:
         with self.assertRaises(ValueError):
             protocol.brightness(101)

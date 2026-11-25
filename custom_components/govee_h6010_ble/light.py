@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import timedelta
+import logging
 from typing import Any
 
 from bleak import BleakClient
@@ -30,13 +32,30 @@ from .const import (
     MAX_KELVIN,
     MIN_BRIGHTNESS,
     MIN_KELVIN,
+    NOTIFY_UUID,
     WRITE_HANDLE,
     WRITE_UUID,
 )
-from .protocol import brightness, color_temperature, kelvin_to_rgb, power, rgb
+from .protocol import (
+    brightness,
+    color_temperature,
+    kelvin_to_rgb,
+    parse_status,
+    power,
+    query_brightness,
+    query_color,
+    query_power,
+    rgb,
+)
+
+_LOGGER = logging.getLogger(__name__)
 
 PARALLEL_UPDATES = 0
 CONNECT_TIMEOUT = 5.0
+# The app polls only occasionally; a five minute interval is enough to pick up
+# changes made through other controllers without keeping the radio busy.
+SCAN_INTERVAL = timedelta(minutes=5)
+REPLY_TIMEOUT = 2.0
 
 
 async def async_setup_entry(
@@ -68,7 +87,6 @@ class GoveeH6010Light(LightEntity):
 
     _attr_has_entity_name = True
     _attr_name = None
-    _attr_should_poll = False
     _attr_assumed_state = True
     _attr_supported_color_modes = {ColorMode.RGB, ColorMode.COLOR_TEMP}
     _attr_color_mode = ColorMode.RGB
@@ -92,7 +110,12 @@ class GoveeH6010Light(LightEntity):
             model="H6010",
         )
         self._client: BleakClient | None = None
+        self._write_char: BleakGATTCharacteristic | str | None = None
+        self._notify_char: BleakGATTCharacteristic | str | None = None
         self._connect_lock = asyncio.Lock()
+        self._io_lock = asyncio.Lock()
+        self._state_replies: dict[int, bytes] = {}
+        self._state_event = asyncio.Event()
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn on, optionally setting brightness, RGB or color temperature."""
@@ -158,16 +181,84 @@ class GoveeH6010Light(LightEntity):
             self.async_write_ha_state()
             raise
 
+    async def async_update(self) -> None:
+        """Read the real state occasionally, e.g. after changes made elsewhere.
+
+        Only power is queried while the light is off. Brightness and color are
+        queried when it is on, so polling stays cheap.
+        """
+        try:
+            client = await self._async_client()
+        except HomeAssistantError:
+            return
+
+        expected = {0x01}
+        if self._attr_is_on:
+            expected.update({0x04, 0x05})
+
+        self._state_replies.clear()
+        self._state_event.clear()
+        try:
+            async with self._io_lock:
+                for frame in (
+                    [query_power(), query_brightness(), query_color()]
+                    if self._attr_is_on
+                    else [query_power()]
+                ):
+                    await client.write_gatt_char(
+                        self._write_char or WRITE_UUID, frame, response=False
+                    )
+            deadline = asyncio.get_running_loop().time() + REPLY_TIMEOUT
+            while not expected <= self._state_replies.keys():
+                remaining = deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
+                    return
+                self._state_event.clear()
+                await asyncio.wait_for(self._state_event.wait(), remaining)
+        except (BleakError, TimeoutError, OSError, asyncio.TimeoutError):
+            await self._async_disconnect()
+            return
+
+        self._apply_status_replies()
+
+    def _apply_status_replies(self) -> None:
+        """Merge parsed replies into the entity state."""
+        for command, frame in list(self._state_replies.items()):
+            status = parse_status(frame)
+            if status is None:
+                continue
+            if command == 0x01:
+                self._attr_is_on = bool(status.get("is_on"))
+            elif command == 0x04:
+                percent = int(status.get("brightness", 0))
+                if MIN_BRIGHTNESS <= percent <= MAX_BRIGHTNESS:
+                    self._attr_brightness = round(percent * 255 / 100)
+            elif command == 0x05:
+                if "kelvin" in status:
+                    self._attr_color_temp_kelvin = int(status["kelvin"])
+                    self._attr_color_mode = ColorMode.COLOR_TEMP
+                elif "rgb" in status:
+                    self._attr_rgb_color = tuple(status["rgb"])
+                    self._attr_color_mode = ColorMode.RGB
+        self.async_write_ha_state()
+
+    def _notification_handler(self, _characteristic: Any, data: bytearray) -> None:
+        """Collect status replies sent by the light."""
+        frame = bytes(data)
+        if len(frame) >= 3 and frame[0] == 0xAA:
+            self._state_replies[frame[1]] = frame
+            self._state_event.set()
+
     async def _async_send(self, frames: list[bytes]) -> None:
         """Write frames over a reused connection, retrying once on failure."""
         for attempt in range(2):
             client = await self._async_client()
             try:
-                characteristic = _find_write_characteristic(client)
-                for frame in frames:
-                    await client.write_gatt_char(
-                        characteristic, frame, response=False
-                    )
+                async with self._io_lock:
+                    for frame in frames:
+                        await client.write_gatt_char(
+                            self._write_char or WRITE_UUID, frame, response=False
+                        )
                 return
             except (BleakError, TimeoutError, OSError) as err:
                 await self._async_disconnect()
@@ -202,11 +293,28 @@ class GoveeH6010Light(LightEntity):
                     f"Could not connect to {self._address}: {err}"
                 ) from err
             self._client = client
+            self._write_char = _find_write_characteristic(client)
+            self._notify_char = _find_notify_characteristic(client)
+            if self._notify_char is not None:
+                try:
+                    await client.start_notify(
+                        self._notify_char, self._notification_handler
+                    )
+                except (BleakError, OSError):
+                    _LOGGER.debug("Status notifications unavailable for %s", self._address)
+                    self._notify_char = None
             return client
 
     async def _async_disconnect(self) -> None:
         client = self._client
         self._client = None
+        self._write_char = None
+        if self._notify_char is not None and client is not None:
+            try:
+                await client.stop_notify(self._notify_char)
+            except (BleakError, OSError):
+                pass
+        self._notify_char = None
         if client is None:
             return
         try:
@@ -222,18 +330,13 @@ class GoveeH6010Light(LightEntity):
 def _find_write_characteristic(
     client: BleakClient,
 ) -> BleakGATTCharacteristic | str:
-    """Prefer the documented Govee write characteristic.
-
-    Falls back to the observed handle, then to any writable characteristic,
-    so minor firmware/UUID differences do not break the entity.
-    """
+    """Prefer the documented Govee write characteristic."""
     try:
         characteristics = [
             char for service in client.services for char in service.characteristics
         ]
     except (BleakError, AttributeError):
         return WRITE_UUID
-
     for char in characteristics:
         if str(char.uuid).lower() == WRITE_UUID.lower():
             return char
@@ -244,3 +347,25 @@ def _find_write_characteristic(
         if "write" in char.properties:
             return char
     return WRITE_UUID
+
+
+def _find_notify_characteristic(
+    client: BleakClient,
+) -> BleakGATTCharacteristic | None:
+    """Find the status notification characteristic."""
+    try:
+        characteristics = [
+            char for service in client.services for char in service.characteristics
+        ]
+    except (BleakError, AttributeError):
+        return None
+    for char in characteristics:
+        if str(char.uuid).lower() == NOTIFY_UUID.lower():
+            return char
+    for char in characteristics:
+        if char.handle == 0x000E and "notify" in char.properties:
+            return char
+    for char in characteristics:
+        if "notify" in char.properties:
+            return char
+    return None

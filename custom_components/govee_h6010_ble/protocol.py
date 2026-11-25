@@ -112,6 +112,42 @@ def query_power() -> bytes:
     return frame(QUERY_POWER, read=True)
 
 
+def query_brightness() -> bytes:
+    return frame(CMD_BRIGHTNESS, read=True)
+
+
+def query_color() -> bytes:
+    return frame(CMD_COLOR, read=True)
+
+
+def parse_status(frame: bytes) -> dict[str, object] | None:
+    """Parse an AA status reply received on the notify characteristic.
+
+    Captured examples::
+
+        aa 01 01 00 ... aa    power on
+        aa 04 64 00 ... ca    brightness 100%
+        aa 05 0d ff b1 6d 0b b8 ...   RGB (255,177,109), 3000K
+    """
+    if (
+        len(frame) != FRAME_LENGTH
+        or frame[0] != QUERY
+        or frame[19] != checksum(frame[:19])
+    ):
+        return None
+    command = frame[1]
+    if command == QUERY_POWER:
+        return {"is_on": bool(frame[2])}
+    if command == CMD_BRIGHTNESS:
+        return {"brightness": frame[2]}
+    if command == CMD_COLOR and frame[2] == COLOR_MODE_RGBWW:
+        kelvin = (frame[6] << 8) | frame[7]
+        if kelvin:
+            return {"kelvin": kelvin}
+        return {"rgb": (frame[3], frame[4], frame[5])}
+    return None
+
+
 def kelvin_to_rgb(kelvin: int) -> tuple[int, int, int]:
     """Approximate the Govee Kelvin tint (Tanner Helland's curve fit)."""
     import math
