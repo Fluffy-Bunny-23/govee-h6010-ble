@@ -41,9 +41,10 @@ class GoveeH6010BLEConfigFlow(BluetoothConfigFlow, domain=DOMAIN):
         self, discovery_info: BluetoothServiceInfoBleak
     ) -> FlowResult:
         """Handle an advertisement matched by the manifest."""
-        match = match_advertisement(
-            discovery_info.local_name or discovery_info.name
-        )
+        # HA passes BluetoothServiceInfoBleak, whose advertised name is
+        # exposed as .name (there is no .local_name attribute).
+        advertised_name = getattr(discovery_info, "local_name", None) or discovery_info.name
+        match = match_advertisement(advertised_name)
         if match is None:
             return self.async_abort(reason="not_supported")
 

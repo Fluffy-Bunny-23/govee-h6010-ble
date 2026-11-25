@@ -90,11 +90,12 @@ python3 -m json.tool custom_components/govee_h6010_ble/manifest.json >/dev/null
 No Home Assistant installation is needed for the protocol tests.
 
 `tests/ha_runtime_check.py` loads the real component under an installed Home
-Assistant (verified with 2026.11.3) and checks three things: the manifest and
-modules import cleanly, an `ihoment_H6010_*` advertisement produces a config
-entry through `async_step_bluetooth`, and the light entity emits the expected
-frames for power, brightness, RGB and color temperature. BLE transport is
-mocked there, so it does not prove a real radio or proxy connection.
+Assistant (verified with 2026.11.3) and checks: the manifest Bluetooth matchers
+against real `BluetoothServiceInfoBleak` objects for both `ihoment_H6010_*` and
+`ihoment_H6008_*`, config-flow auto-discovery producing an entry with the
+correct model for each, and the light entity emitting the expected frames for
+power, brightness, RGB and color temperature. BLE transport is mocked there,
+so it does not prove a real radio or proxy connection.
 
 ```sh
 python3 -m pip install homeassistant aiousbwatcher aiohasupervisor serialx habluetooth

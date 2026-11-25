@@ -10,10 +10,16 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import importlib
+import json
 import pathlib
 import sys
-from types import SimpleNamespace
+import time
 from unittest.mock import AsyncMock, MagicMock
+
+from bleak.backends.device import BLEDevice
+from bleak.backends.scanner import AdvertisementData
+from homeassistant.components.bluetooth.match import ble_device_matches
+from habluetooth.models import BluetoothServiceInfoBleak
 
 CONFIG = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(CONFIG))
@@ -84,6 +90,35 @@ class FakeBleakClient:
             self._notify_callback(char, bytearray(reply))
 
 
+def make_service_info(name: str, address: str) -> BluetoothServiceInfoBleak:
+    """Build the same object HA passes to async_step_bluetooth."""
+    device = BLEDevice(address, name, None)
+    adv = AdvertisementData(
+        local_name=name,
+        manufacturer_data={},
+        service_data={},
+        service_uuids=[],
+        rssi=-60,
+        tx_power=None,
+        platform_data=None,
+    )
+    return BluetoothServiceInfoBleak.from_device_and_advertisement_data(
+        device, adv, "local", time.time(), True
+    )
+
+
+def test_manifest_matchers() -> None:
+    manifest = json.loads(
+        (CONFIG / "custom_components/govee_h6010_ble/manifest.json").read_text()
+    )
+    matchers = manifest["bluetooth"]
+    for name in ("ihoment_H6010_XXXX", "ihoment_H6008_XXXX"):
+        info = make_service_info(name, "AA:BB:CC:DD:EE:FF")
+        matched = [m for m in matchers if ble_device_matches(m, info)]
+        assert matched, f"no manifest matcher for {name}"
+        print("MANIFEST MATCH:", name, "->", matched[0]["local_name"])
+
+
 async def test_config_flow() -> dict:
     from homeassistant.config_entries import HANDLERS
 
@@ -99,11 +134,7 @@ async def test_config_flow() -> dict:
     flow.async_show_form = lambda **kw: {"type": "form", **kw}
     flow.async_create_entry = lambda **kw: {"type": "create_entry", **kw}
 
-    discovery = SimpleNamespace(
-        address="AA:BB:CC:DD:EE:FF",
-        local_name="ihoment_H6010_XXXX",
-        name="ihoment_H6010_XXXX",
-    )
+    discovery = make_service_info("ihoment_H6010_XXXX", "AA:BB:CC:DD:EE:FF")
     first = await flow.async_step_bluetooth(discovery)
     assert first["type"] == "form" and first["step_id"] == "bluetooth_confirm", first
     entry = await flow.async_step_bluetooth_confirm({})
@@ -118,11 +149,7 @@ async def test_config_flow() -> dict:
     flow2._abort_if_unique_id_configured = MagicMock()
     flow2.async_show_form = lambda **kw: {"type": "form", **kw}
     flow2.async_create_entry = lambda **kw: {"type": "create_entry", **kw}
-    discovery2 = SimpleNamespace(
-        address="11:22:33:44:55:66",
-        local_name="ihoment_H6008_XXXX",
-        name="ihoment_H6008_XXXX",
-    )
+    discovery2 = make_service_info("ihoment_H6008_XXXX", "11:22:33:44:55:66")
     await flow2.async_step_bluetooth(discovery2)
     entry2 = await flow2.async_step_bluetooth_confirm({})
     assert entry2["data"]["model"] == "H6008", entry2
@@ -173,6 +200,7 @@ async def test_light() -> list[str]:
 
 
 async def main() -> None:
+    test_manifest_matchers()
     entry = await test_config_flow()
     print("AUTODISCOVERY:", entry)
     frames = await test_light()
