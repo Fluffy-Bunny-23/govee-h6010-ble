@@ -65,13 +65,20 @@ status reads; opening a connection per service call is what otherwise makes
 proxy control feel slow. If that connection drops, it is rebuilt from the best
 available adapter or proxy.
 
+A lightweight power query is sent every ten seconds over the open connection,
+matching what the Govee app does to keep idle links alive. If that link is
+taken by another controller, the entity drops its reference without waiting
+for bleak's long disconnect timeout.
+
 Every five minutes the entity asks the light for its real state over the same
 connection, so changes made from the Govee app or another controller are
 picked up. When the light is off it only sends the one-byte power query; when
 on it queries power, brightness and color. Status replies arrive on the
 notify characteristic (`aa 01` power, `aa 04` brightness, `aa 05 0d` color).
 If notifications are unavailable through a proxy, the entity simply keeps its
-optimistic state.
+optimistic state. A failed command no longer rolls the UI state back: the
+requested value stays visible until the next successful status poll, so the
+colour no longer flashes back after another controller changes the light.
 
 Both models use the same 20-byte command dialect. H6008 was verified from a
 captured session with two lights (desk and floor lamp, firmware 1.00.69): the

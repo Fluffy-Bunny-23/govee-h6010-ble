@@ -16,9 +16,21 @@ import sys
 import time
 from unittest.mock import AsyncMock, MagicMock
 
+
+def mock_hass():
+    hass = MagicMock()
+
+    def create_task(coro):
+        coro.close()
+        return MagicMock()
+
+    hass.async_create_task = create_task
+    return hass
+
 from bleak.backends.device import BLEDevice
 from bleak.backends.scanner import AdvertisementData
 from homeassistant.components.bluetooth.match import ble_device_matches
+from homeassistant.exceptions import HomeAssistantError
 from habluetooth.models import BluetoothServiceInfoBleak
 
 CONFIG = pathlib.Path(__file__).resolve().parents[1]
@@ -158,7 +170,7 @@ async def test_config_flow() -> dict:
 
 
 async def test_light() -> list[str]:
-    hass = MagicMock()
+    hass = mock_hass()
     light_mod.async_ble_device_from_address = lambda *args, **kwargs: object()
     light_mod.BleakClient = FakeBleakClient
     FakeBleakClient.frames = []
@@ -199,8 +211,20 @@ async def test_light() -> list[str]:
     return frames
 
 
+async def test_failed_connect_keeps_state() -> None:
+    entity = light_mod.GoveeH6010Light(
+        mock_hass(), "11:22:33:44:55:66", "H6008 test", "entry2", "H6008"
+    )
+    entity.async_write_ha_state = lambda: None
+    entity._async_client = AsyncMock(side_effect=HomeAssistantError("link busy"))
+    await entity.async_turn_on(rgb_color=(0, 255, 0))
+    assert entity.rgb_color == (0, 255, 0), entity.rgb_color
+    print("FAILED CONNECT KEEPS STATE:", entity.rgb_color)
+
+
 async def main() -> None:
     test_manifest_matchers()
+    await test_failed_connect_keeps_state()
     entry = await test_config_flow()
     print("AUTODISCOVERY:", entry)
     frames = await test_light()

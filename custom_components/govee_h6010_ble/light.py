@@ -52,7 +52,8 @@ from .protocol import (
 _LOGGER = logging.getLogger(__name__)
 
 PARALLEL_UPDATES = 0
-CONNECT_TIMEOUT = 5.0
+CONNECT_TIMEOUT = 15.0
+KEEPALIVE_INTERVAL = 10.0
 # The app polls only occasionally; a five minute interval is enough to pick up
 # changes made through other controllers without keeping the radio busy.
 SCAN_INTERVAL = timedelta(minutes=5)
@@ -123,6 +124,7 @@ class GoveeH6010Light(LightEntity):
         self._io_lock = asyncio.Lock()
         self._state_replies: dict[int, bytes] = {}
         self._state_event = asyncio.Event()
+        self._keepalive_task: asyncio.Task | None = None
 
     async def async_added_to_hass(self) -> None:
         """Open the connection early so the first control is not delayed."""
@@ -137,13 +139,6 @@ class GoveeH6010Light(LightEntity):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn on, optionally setting brightness, RGB or color temperature."""
-        previous = (
-            self._attr_is_on,
-            self._attr_brightness,
-            self._attr_rgb_color,
-            self._attr_color_temp_kelvin,
-            self._attr_color_mode,
-        )
         frames: list[bytes] = []
         if not self._attr_is_on:
             frames.append(power(True))
@@ -176,28 +171,19 @@ class GoveeH6010Light(LightEntity):
         self.async_write_ha_state()
         try:
             await self._async_send(frames)
-        except HomeAssistantError:
-            (
-                self._attr_is_on,
-                self._attr_brightness,
-                self._attr_rgb_color,
-                self._attr_color_temp_kelvin,
-                self._attr_color_mode,
-            ) = previous
-            self.async_write_ha_state()
-            raise
+        except HomeAssistantError as err:
+            # Keep the optimistic state. Rolling it back makes the UI flash a
+            # wrong value when another controller briefly holds the light.
+            _LOGGER.debug("Command to %s failed: %s", self._address, err)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the light off."""
-        was_on = self._attr_is_on
         self._attr_is_on = False
         self.async_write_ha_state()
         try:
             await self._async_send([power(False)])
-        except HomeAssistantError:
-            self._attr_is_on = was_on
-            self.async_write_ha_state()
-            raise
+        except HomeAssistantError as err:
+            _LOGGER.debug("Power off for %s failed: %s", self._address, err)
 
     async def async_update(self) -> None:
         """Read the real state occasionally, e.g. after changes made elsewhere.
@@ -279,7 +265,7 @@ class GoveeH6010Light(LightEntity):
                         )
                 return
             except (BleakError, TimeoutError, OSError) as err:
-                await self._async_disconnect()
+                await self._async_disconnect(force=True)
                 if attempt:
                     raise HomeAssistantError(
                         f"Failed to write to {self._address}: {err}"
@@ -321,19 +307,40 @@ class GoveeH6010Light(LightEntity):
                 except (BleakError, OSError):
                     _LOGGER.debug("Status notifications unavailable for %s", self._address)
                     self._notify_char = None
+            self._keepalive_task = self.hass.async_create_task(
+                self._async_keepalive(client)
+            )
             return client
 
-    async def _async_disconnect(self) -> None:
+    async def _async_keepalive(self, client: BleakClient) -> None:
+        """Send the app's lightweight power query so idle proxies keep the link."""
+        try:
+            while True:
+                await asyncio.sleep(KEEPALIVE_INTERVAL)
+                if self._client is not client:
+                    return
+                async with self._io_lock:
+                    await client.write_gatt_char(
+                        self._write_char or WRITE_UUID,
+                        query_power(),
+                        response=False,
+                    )
+        except asyncio.CancelledError:
+            return
+        except (BleakError, TimeoutError, OSError):
+            await self._async_disconnect(force=True)
+
+    async def _async_disconnect(self, *, force: bool = False) -> None:
         client = self._client
         self._client = None
         self._write_char = None
-        if self._notify_char is not None and client is not None:
-            try:
-                await client.stop_notify(self._notify_char)
-            except (BleakError, OSError):
-                pass
         self._notify_char = None
-        if client is None:
+        if self._keepalive_task is not None:
+            self._keepalive_task.cancel()
+            self._keepalive_task = None
+        if client is None or force:
+            # On a failed link, awaiting bleak's disconnect can hang for its
+            # own 20s timeout. Drop the reference and let the stack clean up.
             return
         try:
             await client.disconnect()
