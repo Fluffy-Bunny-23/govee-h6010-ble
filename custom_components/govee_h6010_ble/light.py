@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from datetime import timedelta
 import logging
+import time
 from typing import Any
 
 from bleak import BleakClient
@@ -54,6 +55,7 @@ _LOGGER = logging.getLogger(__name__)
 PARALLEL_UPDATES = 0
 CONNECT_TIMEOUT = 15.0
 KEEPALIVE_INTERVAL = 10.0
+POLL_STATE_HOLD = 60.0
 # The app polls only occasionally; a five minute interval is enough to pick up
 # changes made through other controllers without keeping the radio busy.
 SCAN_INTERVAL = timedelta(minutes=5)
@@ -125,6 +127,7 @@ class GoveeH6010Light(LightEntity):
         self._state_replies: dict[int, bytes] = {}
         self._state_event = asyncio.Event()
         self._keepalive_task: asyncio.Task | None = None
+        self._last_command = 0.0
 
     async def async_added_to_hass(self) -> None:
         """Open the connection early so the first control is not delayed."""
@@ -171,6 +174,7 @@ class GoveeH6010Light(LightEntity):
         self.async_write_ha_state()
         try:
             await self._async_send(frames)
+            self.async_write_ha_state()
         except HomeAssistantError as err:
             # Keep the optimistic state. Rolling it back makes the UI flash a
             # wrong value when another controller briefly holds the light.
@@ -182,6 +186,7 @@ class GoveeH6010Light(LightEntity):
         self.async_write_ha_state()
         try:
             await self._async_send([power(False)])
+            self.async_write_ha_state()
         except HomeAssistantError as err:
             _LOGGER.debug("Power off for %s failed: %s", self._address, err)
 
@@ -226,8 +231,16 @@ class GoveeH6010Light(LightEntity):
         self._apply_status_replies()
 
     def _apply_status_replies(self) -> None:
-        """Merge parsed replies into the entity state."""
+        """Merge parsed replies into the entity state.
+
+        A just-sent command wins over a status reply. Some lights keep the old
+        Kelvin field in their answer, which otherwise makes the colour picker
+        snap back to the previous colour right after a change.
+        """
+        fresh_command = time.monotonic() - self._last_command < POLL_STATE_HOLD
         for command, frame in list(self._state_replies.items()):
+            if fresh_command and command in (0x04, 0x05):
+                continue
             status = parse_status(frame)
             if status is None:
                 continue
@@ -255,6 +268,7 @@ class GoveeH6010Light(LightEntity):
 
     async def _async_send(self, frames: list[bytes]) -> None:
         """Write frames over a reused connection, retrying once on failure."""
+        self._last_command = time.monotonic()
         for attempt in range(2):
             client = await self._async_client()
             try:

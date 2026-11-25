@@ -80,6 +80,12 @@ optimistic state. A failed command no longer rolls the UI state back: the
 requested value stays visible until the next successful status poll, so the
 colour no longer flashes back after another controller changes the light.
 
+For 60 seconds after a command, polling ignores brightness and colour replies.
+Some H6008 firmware reports an old Kelvin field after an RGB command, which
+made the colour picker snap back immediately even though the light was correct.
+Power is still polled during that window. External changes made in that minute
+are picked up at the next poll afterwards.
+
 Both models use the same 20-byte command dialect. H6008 was verified from a
 captured session with two lights (desk and floor lamp, firmware 1.00.69): the
 app sends `33 04 <percent>` for brightness, `33 05 0d <R G B>` for color and

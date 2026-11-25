@@ -183,12 +183,24 @@ async def test_light() -> list[str]:
 
     await entity.async_turn_on(brightness=186, rgb_color=(255, 0, 0))
     await entity.async_turn_on(color_temp_kelvin=5900)
+    entity._last_command = 0.0  # simulate a poll well after the last command
     await entity.async_update()
     assert entity.is_on is True, entity.is_on
     assert entity.brightness == 128, entity.brightness
     assert entity.rgb_color == (255, 0, 0), entity.rgb_color
     print("POLL RESULT:", entity.is_on, entity.brightness, entity.rgb_color)
     await entity.async_turn_off()
+
+    # A stale status reply must not undo a just-sent colour.
+    entity._state_replies = {
+        0x01: bytes.fromhex("aa010100000000000000000000000000000000aa"),
+        0x04: bytes.fromhex(protocol.frame(0x04, bytes([10]), read=True).hex()),
+        0x05: bytes.fromhex("aa050dffb16d0bb8000000000000000000000032"),
+    }
+    entity._apply_status_replies()
+    assert entity.rgb_color == (255, 0, 0), entity.rgb_color
+    assert entity.brightness == 128, entity.brightness
+    print("STALE POLL IGNORED:", entity.rgb_color, entity.brightness)
 
     assert entity.unique_id == "AA:BB:CC:DD:EE:FF_light"
     assert entity.device_info["model"] == "H6008"
