@@ -79,7 +79,7 @@ class ProtocolTest(unittest.TestCase):
         self.assertIsNotNone(match)
         self.assertEqual(match.model, "H6010")
         self.assertEqual(match.name, "ihoment_H6010_XXXX")
-        h6008 = protocol.match_advertisement("ihoment_H6008_AC0B")
+        h6008 = protocol.match_advertisement("ihoment_H6008_XXXX")
         self.assertIsNotNone(h6008)
         self.assertEqual(h6008.model, "H6008")
         self.assertIsNone(protocol.match_advertisement("Govee_H6102_1234"))
