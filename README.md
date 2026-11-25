@@ -1,11 +1,12 @@
 # Govee H6010 BLE for Home Assistant
 
-A small, local-only Home Assistant integration for the Govee H6010 smart LED.
-It exposes one light entity with on/off, brightness, RGB color and color
-temperature. No Govee account, no cloud, no LAN API, no MQTT bridge.
+A small, local-only Home Assistant integration for Govee H6010 and H6008
+lights. It exposes one light entity with on/off, brightness, RGB color and
+color temperature. No Govee account, no cloud, no LAN API, no MQTT bridge.
 
-The light is discovered automatically from its BLE advertisement
-(`ihoment_H6010_*`), so there is nothing to pair and no code to enter. It works
+Lights are discovered automatically from their BLE advertisements
+(`ihoment_H6010_*` and `ihoment_H6008_*`), so there is nothing to pair and no
+code to enter. It works
 with a local Bluetooth adapter and with ESPHome Bluetooth proxies such as the
 Everything Presence One, because it obtains the BLE device from Home Assistant's
 bluetooth integration rather than opening a raw HCI socket.
@@ -71,6 +72,12 @@ on it queries power, brightness and color. Status replies arrive on the
 notify characteristic (`aa 01` power, `aa 04` brightness, `aa 05 0d` color).
 If notifications are unavailable through a proxy, the entity simply keeps its
 optimistic state.
+
+Both models use the same 20-byte command dialect. H6008 was verified from a
+captured session with two lights (desk and floor lamp, firmware 1.00.69): the
+app sends `33 04 <percent>` for brightness, `33 05 0d <R G B>` for color and
+`33 05 0d <tint> <Kelvin hi/lo> <tint>` for color temperature, the same frames
+the H6010 integration emits.
 
 ## Development
 

@@ -18,6 +18,8 @@ from dataclasses import dataclass
 # This module is deliberately standalone so the frame builders can be unit
 # tested without Home Assistant installed. const.py re-exports these values.
 LOCAL_NAME_PREFIX = "ihoment_H6010_"
+H6008_PREFIX = "ihoment_H6008_"
+SUPPORTED_PREFIXES = (LOCAL_NAME_PREFIX, H6008_PREFIX)
 MIN_KELVIN = 2700
 MAX_KELVIN = 6500
 MIN_BRIGHTNESS = 1
@@ -185,11 +187,16 @@ class AdvertisementMatch:
 def match_advertisement(local_name: str | None) -> AdvertisementMatch | None:
     """Auto-detect the light by its advertised name.
 
-    H6010 advertises as e.g. "ihoment_H6010_XXXX". The suffix varies per unit,
+    H6010/H6008 advertise as e.g. "ihoment_H6010_XXXX" or
+    "ihoment_H6008_XXXX". The suffix varies per unit,
     so match the stable prefix rather than a full name or MAC address.
     """
     if not local_name:
         return None
-    if not local_name.startswith(LOCAL_NAME_PREFIX):
-        return None
-    return AdvertisementMatch(model="H6010", name=local_name)
+    for prefix, model in (
+        (LOCAL_NAME_PREFIX, "H6010"),
+        (H6008_PREFIX, "H6008"),
+    ):
+        if local_name.startswith(prefix):
+            return AdvertisementMatch(model=model, name=local_name)
+    return None

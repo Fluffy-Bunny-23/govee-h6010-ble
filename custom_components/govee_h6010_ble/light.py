@@ -26,6 +26,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
     CONF_ADDRESS,
+    CONF_MODEL,
     CONF_NAME,
     DOMAIN,
     MAX_BRIGHTNESS,
@@ -69,8 +70,9 @@ async def async_setup_entry(
             GoveeH6010Light(
                 hass,
                 entry.data[CONF_ADDRESS],
-                entry.data.get(CONF_NAME) or "Govee H6010",
+                entry.data.get(CONF_NAME) or "Govee Light",
                 entry.entry_id,
+                entry.data.get(CONF_MODEL, "H6010"),
             )
         ]
     )
@@ -98,7 +100,12 @@ class GoveeH6010Light(LightEntity):
     _attr_is_on = False
 
     def __init__(
-        self, hass: HomeAssistant, address: str, name: str, entry_id: str
+        self,
+        hass: HomeAssistant,
+        address: str,
+        name: str,
+        entry_id: str,
+        model: str = "H6010",
     ) -> None:
         self.hass = hass
         self._address = address
@@ -107,7 +114,7 @@ class GoveeH6010Light(LightEntity):
             identifiers={(DOMAIN, address)},
             name=name,
             manufacturer="Govee",
-            model="H6010",
+            model=model,
         )
         self._client: BleakClient | None = None
         self._write_char: BleakGATTCharacteristic | str | None = None
@@ -116,6 +123,17 @@ class GoveeH6010Light(LightEntity):
         self._io_lock = asyncio.Lock()
         self._state_replies: dict[int, bytes] = {}
         self._state_event = asyncio.Event()
+
+    async def async_added_to_hass(self) -> None:
+        """Open the connection early so the first control is not delayed."""
+        self.hass.async_create_task(self._async_preconnect())
+
+    async def _async_preconnect(self) -> None:
+        await asyncio.sleep(2)
+        try:
+            await self._async_client()
+        except HomeAssistantError:
+            pass
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn on, optionally setting brightness, RGB or color temperature."""

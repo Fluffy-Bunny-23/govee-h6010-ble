@@ -79,12 +79,24 @@ class ProtocolTest(unittest.TestCase):
         self.assertIsNotNone(match)
         self.assertEqual(match.model, "H6010")
         self.assertEqual(match.name, "ihoment_H6010_XXXX")
+        h6008 = protocol.match_advertisement("ihoment_H6008_AC0B")
+        self.assertIsNotNone(h6008)
+        self.assertEqual(h6008.model, "H6008")
         self.assertIsNone(protocol.match_advertisement("Govee_H6102_1234"))
         self.assertIsNone(protocol.match_advertisement(None))
 
     def test_captured_kelvin_tints(self) -> None:
         self.assertEqual(protocol.kelvin_to_rgb(5900), (255, 243, 234))
         self.assertEqual(protocol.kelvin_to_rgb(2900), (255, 182, 98))
+
+    def test_h6008_frames_match_capture(self) -> None:
+        self.assertEqual(
+            protocol.brightness(34).hex(),
+            "3304220000000000000000000000000000000015",
+        )
+        frame = protocol.color_temperature(5300, (255, 235, 215))
+        self.assertEqual(len(frame), 20)
+        self.assertEqual(frame[6:11].hex(), "14b4ffebd7")
 
     def test_parse_status_replies_from_capture(self) -> None:
         self.assertEqual(

@@ -110,6 +110,23 @@ async def test_config_flow() -> dict:
     assert entry["type"] == "create_entry", entry
     assert entry["data"]["address"] == "AA:BB:CC:DD:EE:FF", entry
     assert entry["title"] == "ihoment_H6010_XXXX", entry
+
+    flow2 = flow_mod.GoveeH6010BLEConfigFlow()
+    flow2.hass = MagicMock()
+    flow2.context = {}
+    flow2.async_set_unique_id = AsyncMock()
+    flow2._abort_if_unique_id_configured = MagicMock()
+    flow2.async_show_form = lambda **kw: {"type": "form", **kw}
+    flow2.async_create_entry = lambda **kw: {"type": "create_entry", **kw}
+    discovery2 = SimpleNamespace(
+        address="11:22:33:44:55:66",
+        local_name="ihoment_H6008_XXXX",
+        name="ihoment_H6008_XXXX",
+    )
+    await flow2.async_step_bluetooth(discovery2)
+    entry2 = await flow2.async_step_bluetooth_confirm({})
+    assert entry2["data"]["model"] == "H6008", entry2
+    print("H6008 DISCOVERY:", entry2)
     return entry
 
 
@@ -121,7 +138,7 @@ async def test_light() -> list[str]:
     FakeBleakClient.connections = 0
 
     entity = light_mod.GoveeH6010Light(
-        hass, "AA:BB:CC:DD:EE:FF", "ihoment_H6010_XXXX", "entry1"
+        hass, "AA:BB:CC:DD:EE:FF", "ihoment_H6008_XXXX", "entry1", "H6008"
     )
     entity.async_write_ha_state = lambda: None
 
@@ -135,7 +152,7 @@ async def test_light() -> list[str]:
     await entity.async_turn_off()
 
     assert entity.unique_id == "AA:BB:CC:DD:EE:FF_light"
-    assert entity.device_info["model"] == "H6010"
+    assert entity.device_info["model"] == "H6008"
     assert FakeBleakClient.connections == 1, FakeBleakClient.connections
     print("BLE CONNECTIONS FOR ALL COMMANDS:", FakeBleakClient.connections)
     all_frames = [bytes(frame) for frame in FakeBleakClient.frames]

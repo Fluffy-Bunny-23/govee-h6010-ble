@@ -16,7 +16,7 @@ from homeassistant.components.bluetooth import BluetoothServiceInfoBleak
 from homeassistant.components.bluetooth.config_flow import BluetoothConfigFlow
 from homeassistant.data_entry_flow import FlowResult
 
-from .const import CONF_ADDRESS, CONF_NAME, DOMAIN, LOCAL_NAME_PREFIX
+from .const import CONF_ADDRESS, CONF_MODEL, CONF_NAME, DOMAIN, LOCAL_NAME_PREFIX
 from .protocol import match_advertisement
 
 MAC_RE = re.compile(r"^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$")
@@ -35,6 +35,7 @@ class GoveeH6010BLEConfigFlow(BluetoothConfigFlow, domain=DOMAIN):
         super().__init__()
         self._address: str | None = None
         self._name: str | None = None
+        self._model: str = "H6010"
 
     async def async_step_bluetooth(
         self, discovery_info: BluetoothServiceInfoBleak
@@ -48,6 +49,7 @@ class GoveeH6010BLEConfigFlow(BluetoothConfigFlow, domain=DOMAIN):
 
         self._address = discovery_info.address.upper()
         self._name = match.name
+        self._model = match.model
         await self.async_set_unique_id(self._address)
         self._abort_if_unique_id_configured()
         self.context["title_placeholders"] = {"name": self._name}
@@ -82,6 +84,7 @@ class GoveeH6010BLEConfigFlow(BluetoothConfigFlow, domain=DOMAIN):
                 self._abort_if_unique_id_configured()
                 self._address = address
                 self._name = match.name
+                self._model = match.model
                 return self._create_entry()
 
         schema = vol.Schema(
@@ -97,5 +100,9 @@ class GoveeH6010BLEConfigFlow(BluetoothConfigFlow, domain=DOMAIN):
     def _create_entry(self) -> FlowResult:
         return self.async_create_entry(
             title=self._name or "Govee H6010",
-            data={CONF_ADDRESS: self._address, CONF_NAME: self._name},
+            data={
+                CONF_ADDRESS: self._address,
+                CONF_NAME: self._name,
+                CONF_MODEL: self._model,
+            },
         )

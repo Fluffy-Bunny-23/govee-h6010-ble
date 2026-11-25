@@ -14,8 +14,10 @@ DOMAIN = "govee_h6010_ble"
 
 CONF_ADDRESS = "address"
 CONF_NAME = "name"
+CONF_MODEL = "model"
 
-LOCAL_NAME_MATCHER = "ihoment_H6010_*"
+LOCAL_NAME_MATCHERS = ("ihoment_H6010_*", "ihoment_H6008_*")
+LOCAL_NAME_MATCHER = LOCAL_NAME_MATCHERS[0]
 
 # Observed on a Fire HD 8 in airplane mode with Bluetooth re-enabled:
 # write handle 0x0011, notify handle 0x000F (CCCD).
