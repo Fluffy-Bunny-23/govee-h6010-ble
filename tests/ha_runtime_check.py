@@ -42,6 +42,12 @@ class FakeBleakClient:
 
 
 async def test_config_flow() -> dict:
+    from homeassistant.config_entries import HANDLERS
+
+    handler = HANDLERS.get("govee_h6010_ble")
+    assert handler is flow_mod.GoveeH6010BLEConfigFlow, handler
+    print("CONFIG FLOW HANDLER REGISTERED:", handler.__name__)
+
     flow = flow_mod.GoveeH6010BLEConfigFlow()
     flow.hass = MagicMock()
     flow.context = {}

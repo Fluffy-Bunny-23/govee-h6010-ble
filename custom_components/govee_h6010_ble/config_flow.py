@@ -22,10 +22,13 @@ from .protocol import match_advertisement
 MAC_RE = re.compile(r"^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$")
 
 
-class GoveeH6010BLEConfigFlow(BluetoothConfigFlow):
-    """Discover or manually add an H6010 light."""
+class GoveeH6010BLEConfigFlow(BluetoothConfigFlow, domain=DOMAIN):
+    """Discover or manually add an H6010 light.
 
-    DOMAIN = DOMAIN
+    The ``domain=`` keyword registers the handler with Home Assistant. Without
+    it the Add Integration dialog reports "Invalid handler specified".
+    """
+
     VERSION = 1
 
     def __init__(self) -> None:
