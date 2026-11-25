@@ -59,7 +59,11 @@ Brightness is a percentage (1-100) on this light. Color uses sub-mode `0x0D`
 with an RGB triplet and Kelvin fields. Kelvin range is 2700-6500.
 
 State is optimistic. The integration does not poll the device, which keeps it
-friendly to Bluetooth proxies and to battery-powered scanners.
+friendly to Bluetooth proxies and to battery-powered scanners. The UI state is
+updated before the radio write completes, so sliders feel immediate. One BLE
+connection is kept open and reused for all commands; opening a connection per
+service call is what otherwise makes proxy control feel slow. If that
+connection drops, it is rebuilt from the best available adapter or proxy.
 
 ## Development
 

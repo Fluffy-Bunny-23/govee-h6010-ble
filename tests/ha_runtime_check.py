@@ -26,16 +26,23 @@ protocol = importlib.import_module("custom_components.govee_h6010_ble.protocol")
 
 class FakeBleakClient:
     frames: list[bytes] = []
+    connections: int = 0
 
     def __init__(self, device, timeout=None):
         self.device = device
         self.services = []
+        self._connected = False
 
-    async def __aenter__(self):
-        return self
+    @property
+    def is_connected(self):
+        return self._connected
 
-    async def __aexit__(self, *args):
-        return False
+    async def connect(self):
+        type(self).connections += 1
+        self._connected = True
+
+    async def disconnect(self):
+        self._connected = False
 
     async def write_gatt_char(self, char, frame, response=False):
         self.frames.append(bytes(frame))
@@ -75,6 +82,7 @@ async def test_light() -> list[str]:
     light_mod.async_ble_device_from_address = lambda *args, **kwargs: object()
     light_mod.BleakClient = FakeBleakClient
     FakeBleakClient.frames = []
+    FakeBleakClient.connections = 0
 
     entity = light_mod.GoveeH6010Light(
         hass, "AA:BB:CC:DD:EE:FF", "ihoment_H6010_XXXX", "entry1"
@@ -87,6 +95,8 @@ async def test_light() -> list[str]:
 
     assert entity.unique_id == "AA:BB:CC:DD:EE:FF_light"
     assert entity.device_info["model"] == "H6010"
+    assert FakeBleakClient.connections == 1, FakeBleakClient.connections
+    print("BLE CONNECTIONS FOR ALL COMMANDS:", FakeBleakClient.connections)
     frames = [frame.hex() for frame in FakeBleakClient.frames]
     assert frames == [
         protocol.power(True).hex(),
