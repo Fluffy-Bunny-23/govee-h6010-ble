@@ -51,16 +51,16 @@ async def test_config_flow() -> dict:
     flow.async_create_entry = lambda **kw: {"type": "create_entry", **kw}
 
     discovery = SimpleNamespace(
-        address="60:74:F4:53:2C:EF",
-        local_name="ihoment_H6010_2CEF",
-        name="ihoment_H6010_2CEF",
+        address="AA:BB:CC:DD:EE:FF",
+        local_name="ihoment_H6010_XXXX",
+        name="ihoment_H6010_XXXX",
     )
     first = await flow.async_step_bluetooth(discovery)
     assert first["type"] == "form" and first["step_id"] == "bluetooth_confirm", first
     entry = await flow.async_step_bluetooth_confirm({})
     assert entry["type"] == "create_entry", entry
-    assert entry["data"]["address"] == "60:74:F4:53:2C:EF", entry
-    assert entry["title"] == "ihoment_H6010_2CEF", entry
+    assert entry["data"]["address"] == "AA:BB:CC:DD:EE:FF", entry
+    assert entry["title"] == "ihoment_H6010_XXXX", entry
     return entry
 
 
@@ -71,7 +71,7 @@ async def test_light() -> list[str]:
     FakeBleakClient.frames = []
 
     entity = light_mod.GoveeH6010Light(
-        hass, "60:74:F4:53:2C:EF", "ihoment_H6010_2CEF", "entry1"
+        hass, "AA:BB:CC:DD:EE:FF", "ihoment_H6010_XXXX", "entry1"
     )
     entity.async_write_ha_state = lambda: None
 
@@ -79,7 +79,7 @@ async def test_light() -> list[str]:
     await entity.async_turn_on(color_temp_kelvin=5900)
     await entity.async_turn_off()
 
-    assert entity.unique_id == "60:74:F4:53:2C:EF_light"
+    assert entity.unique_id == "AA:BB:CC:DD:EE:FF_light"
     assert entity.device_info["model"] == "H6010"
     frames = [frame.hex() for frame in FakeBleakClient.frames]
     assert frames == [

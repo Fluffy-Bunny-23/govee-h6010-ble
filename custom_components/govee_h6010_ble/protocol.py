@@ -149,7 +149,7 @@ class AdvertisementMatch:
 def match_advertisement(local_name: str | None) -> AdvertisementMatch | None:
     """Auto-detect the light by its advertised name.
 
-    H6010 advertises as e.g. "ihoment_H6010_2CEF". The suffix varies per unit,
+    H6010 advertises as e.g. "ihoment_H6010_XXXX". The suffix varies per unit,
     so match the stable prefix rather than a full name or MAC address.
     """
     if not local_name:

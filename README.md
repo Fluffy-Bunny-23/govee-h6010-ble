@@ -10,12 +10,20 @@ with a local Bluetooth adapter and with ESPHome Bluetooth proxies such as the
 Everything Presence One, because it obtains the BLE device from Home Assistant's
 bluetooth integration rather than opening a raw HCI socket.
 
-## Install
+## Install with HACS
 
-1. Add this repository to HACS as a custom repository of type **Integration**.
-2. Install **Govee H6010 BLE** and restart Home Assistant.
-3. The light appears under Settings > Devices & Services as a discovered
-   device. Confirm it, and the `Light` entity is ready.
+Add this repository URL in HACS as a custom repository of type **Integration**:
+
+```
+https://github.com/Fluffy-Bunny-23/govee-h6010-ble
+```
+
+Steps: HACS → ⋮ → Custom repositories → Repository: paste the URL above,
+Category: Integration → Add. Then search HACS for **Govee H6010 BLE**, install
+it, and restart Home Assistant.
+
+The light is then discovered automatically over Bluetooth. Confirm it under
+Settings > Devices & Services and the `Light` entity is ready.
 
 Manual install: copy `custom_components/govee_h6010_ble` into your Home
 Assistant `config/custom_components` directory and restart.

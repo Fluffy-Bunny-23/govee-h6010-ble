@@ -75,10 +75,10 @@ class ProtocolTest(unittest.TestCase):
             self.assertTrue(all(0 <= value <= 255 for value in tint))
 
     def test_advertisement_autodetect(self) -> None:
-        match = protocol.match_advertisement("ihoment_H6010_2CEF")
+        match = protocol.match_advertisement("ihoment_H6010_XXXX")
         self.assertIsNotNone(match)
         self.assertEqual(match.model, "H6010")
-        self.assertEqual(match.name, "ihoment_H6010_2CEF")
+        self.assertEqual(match.name, "ihoment_H6010_XXXX")
         self.assertIsNone(protocol.match_advertisement("Govee_H6102_1234"))
         self.assertIsNone(protocol.match_advertisement(None))
 

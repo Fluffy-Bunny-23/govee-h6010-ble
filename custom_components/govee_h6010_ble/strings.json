@@ -17,7 +17,7 @@
     "abort": {
       "already_configured": "This light is already configured.",
       "not_supported": "This Bluetooth device is not an H6010.",
-      "invalid_address": "Enter a MAC address like 60:74:F4:53:2C:EF."
+      "invalid_address": "Enter a MAC address like AA:BB:CC:DD:EE:FF."
     }
   }
 }
