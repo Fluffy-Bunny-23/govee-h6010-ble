@@ -200,6 +200,7 @@ async def test_light() -> list[str]:
     entity._apply_status_replies()
     assert entity.rgb_color == (255, 0, 0), entity.rgb_color
     assert entity.brightness == 128, entity.brightness
+    assert entity.is_on is False, entity.is_on  # power-off reply also ignored
     print("STALE POLL IGNORED:", entity.rgb_color, entity.brightness)
 
     assert entity.unique_id == "AA:BB:CC:DD:EE:FF_light"
@@ -234,9 +235,27 @@ async def test_failed_connect_keeps_state() -> None:
     print("FAILED CONNECT KEEPS STATE:", entity.rgb_color)
 
 
+async def test_fresh_power_on_ignores_stale_off_reply() -> None:
+    light_mod.async_ble_device_from_address = lambda *args, **kwargs: object()
+    light_mod.BleakClient = FakeBleakClient
+    entity = light_mod.GoveeH6010Light(
+        mock_hass(), "11:22:33:44:55:66", "H6008 power", "entry3", "H6008"
+    )
+    entity.async_write_ha_state = lambda: None
+    await entity.async_turn_on()
+    assert entity.is_on is True, entity.is_on
+    entity._state_replies = {
+        0x01: bytes.fromhex("aa010000000000000000000000000000000000ab"),
+    }
+    entity._apply_status_replies()
+    assert entity.is_on is True, entity.is_on
+    print("FRESH POWER ON KEPT:", entity.is_on)
+
+
 async def main() -> None:
     test_manifest_matchers()
     await test_failed_connect_keeps_state()
+    await test_fresh_power_on_ignores_stale_off_reply()
     entry = await test_config_flow()
     print("AUTODISCOVERY:", entry)
     frames = await test_light()

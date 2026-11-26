@@ -239,7 +239,7 @@ class GoveeH6010Light(LightEntity):
         """
         fresh_command = time.monotonic() - self._last_command < POLL_STATE_HOLD
         for command, frame in list(self._state_replies.items()):
-            if fresh_command and command in (0x04, 0x05):
+            if fresh_command and command in (0x01, 0x04, 0x05):
                 continue
             status = parse_status(frame)
             if status is None:
