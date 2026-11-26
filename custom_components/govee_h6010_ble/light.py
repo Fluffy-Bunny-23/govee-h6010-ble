@@ -122,6 +122,7 @@ class GoveeH6010Light(LightEntity):
         self._client: BleakClient | None = None
         self._write_char: BleakGATTCharacteristic | str | None = None
         self._notify_char: BleakGATTCharacteristic | str | None = None
+        self._notify_started = False
         self._connect_lock = asyncio.Lock()
         self._io_lock = asyncio.Lock()
         self._state_replies: dict[int, bytes] = {}
@@ -187,10 +188,14 @@ class GoveeH6010Light(LightEntity):
         Only power is queried while the light is off. Brightness and color are
         queried when it is on, so polling stays cheap.
         """
+        if self._pending:
+            # A control command is in flight; polling would only add latency.
+            return
         try:
             client = await self._async_client()
         except HomeAssistantError:
             return
+        await self._async_ensure_notify(client)
 
         expected = {0x01}
         if self._attr_is_on:
@@ -312,7 +317,11 @@ class GoveeH6010Light(LightEntity):
                     "Check that a Bluetooth adapter or proxy is in range."
                 )
 
-            client = BleakClient(device, timeout=CONNECT_TIMEOUT)
+            client = BleakClient(
+                device,
+                timeout=CONNECT_TIMEOUT,
+                disconnected_callback=self._on_disconnected,
+            )
             try:
                 await client.connect()
             except (BleakError, TimeoutError, OSError) as err:
@@ -322,18 +331,30 @@ class GoveeH6010Light(LightEntity):
             self._client = client
             self._write_char = _find_write_characteristic(client)
             self._notify_char = _find_notify_characteristic(client)
-            if self._notify_char is not None:
-                try:
-                    await client.start_notify(
-                        self._notify_char, self._notification_handler
-                    )
-                except (BleakError, OSError):
-                    _LOGGER.debug("Status notifications unavailable for %s", self._address)
-                    self._notify_char = None
+            self._notify_started = False
             self._keepalive_task = self.hass.async_create_task(
                 self._async_keepalive(client)
             )
             return client
+
+    def _on_disconnected(self, client: BleakClient) -> None:
+        """Drop a stale client as soon as the stack reports the link is gone."""
+        if self._client is client:
+            self._client = None
+            self._write_char = None
+            self._notify_char = None
+            self._notify_started = False
+
+    async def _async_ensure_notify(self, client: BleakClient) -> None:
+        """Subscribe to status replies only when a poll actually needs them."""
+        if self._notify_char is None or self._notify_started:
+            return
+        try:
+            await client.start_notify(self._notify_char, self._notification_handler)
+            self._notify_started = True
+        except (BleakError, OSError):
+            _LOGGER.debug("Status notifications unavailable for %s", self._address)
+            self._notify_char = None
 
     async def _async_keepalive(self, client: BleakClient) -> None:
         """Send the app's lightweight power query so idle proxies keep the link."""
@@ -358,6 +379,7 @@ class GoveeH6010Light(LightEntity):
         self._client = None
         self._write_char = None
         self._notify_char = None
+        self._notify_started = False
         if self._keepalive_task is not None:
             self._keepalive_task.cancel()
             self._keepalive_task = None

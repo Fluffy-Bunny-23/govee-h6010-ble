@@ -67,8 +67,13 @@ status reads; opening a connection per service call is what otherwise makes
 proxy control feel slow. If that connection drops, it is rebuilt from the best
 available adapter or proxy.
 
+Notification subscription is deferred until a status poll needs it, so the
+initial connection is cheaper. If the stack reports a disconnect, the stale
+client is dropped immediately instead of waiting for a write to fail.
+
 A lightweight power query is sent every ten seconds over the open connection,
-matching what the Govee app does to keep idle links alive. If that link is
+matching what the Govee app does to keep idle links alive. Polling is skipped
+while a control command is in flight. If that link is
 taken by another controller, the entity drops its reference without waiting
 for bleak's long disconnect timeout.
 

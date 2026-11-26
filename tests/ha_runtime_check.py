@@ -64,8 +64,9 @@ class FakeService:
 class FakeBleakClient:
     frames: list[bytes] = []
     connections: int = 0
+    notify_starts: int = 0
 
-    def __init__(self, device, timeout=None):
+    def __init__(self, device, timeout=None, disconnected_callback=None):
         self.device = device
         self.services = [FakeService()]
         self._connected = False
@@ -82,6 +83,7 @@ class FakeBleakClient:
         self._connected = False
 
     async def start_notify(self, char, callback):
+        type(self).notify_starts += 1
         self._notify_callback = callback
 
     async def stop_notify(self, char):
@@ -181,6 +183,7 @@ async def test_light() -> list[str]:
     light_mod.BleakClient = FakeBleakClient
     FakeBleakClient.frames = []
     FakeBleakClient.connections = 0
+    FakeBleakClient.notify_starts = 0
 
     entity = light_mod.GoveeH6010Light(
         hass, "AA:BB:CC:DD:EE:FF", "ihoment_H6008_XXXX", "entry1", "H6008"
@@ -191,12 +194,15 @@ async def test_light() -> list[str]:
     await drain(entity)
     await entity.async_turn_on(color_temp_kelvin=5900)
     await drain(entity)
+    assert FakeBleakClient.notify_starts == 0, FakeBleakClient.notify_starts
     entity._last_command = 0.0  # simulate a poll well after the last command
     await entity.async_update()
+    assert FakeBleakClient.notify_starts >= 1, FakeBleakClient.notify_starts
     assert entity.is_on is True, entity.is_on
     assert entity.brightness == 128, entity.brightness
     assert entity.rgb_color == (255, 0, 0), entity.rgb_color
-    print("POLL RESULT:", entity.is_on, entity.brightness, entity.rgb_color)
+    print("POLL RESULT:", entity.is_on, entity.brightness, entity.rgb_color,
+          "notify subscriptions:", FakeBleakClient.notify_starts)
     await entity.async_turn_off()
     await drain(entity)
 
