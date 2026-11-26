@@ -59,8 +59,10 @@ write-without-response to `00010203-0405-0607-0809-0a0b0c0d2b11`.
 Brightness is a percentage (1-100) on this light. Color uses sub-mode `0x0D`
 with an RGB triplet and Kelvin fields. Kelvin range is 2700-6500.
 
-The UI state is updated before the radio write completes, so sliders feel
-immediate. One BLE connection is kept open and reused for all commands and
+The UI state is updated before the radio write and the service call returns
+immediately; BLE writes run in a background task, so sliders and toggles do not
+wait on a proxy round-trip. A failed write is retried once on the same link
+before the connection is rebuilt. One BLE connection is kept open and reused for all commands and
 status reads; opening a connection per service call is what otherwise makes
 proxy control feel slow. If that connection drops, it is rebuilt from the best
 available adapter or proxy.

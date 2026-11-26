@@ -128,6 +128,7 @@ class GoveeH6010Light(LightEntity):
         self._state_event = asyncio.Event()
         self._keepalive_task: asyncio.Task | None = None
         self._last_command = 0.0
+        self._pending: set[asyncio.Task] = set()
 
     async def async_added_to_hass(self) -> None:
         """Open the connection early so the first control is not delayed."""
@@ -172,23 +173,13 @@ class GoveeH6010Light(LightEntity):
         self._attr_is_on = True
         # Reflect the change in the UI before waiting on the radio.
         self.async_write_ha_state()
-        try:
-            await self._async_send(frames)
-            self.async_write_ha_state()
-        except HomeAssistantError as err:
-            # Keep the optimistic state. Rolling it back makes the UI flash a
-            # wrong value when another controller briefly holds the light.
-            _LOGGER.debug("Command to %s failed: %s", self._address, err)
+        self._async_queue_send(frames)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the light off."""
         self._attr_is_on = False
         self.async_write_ha_state()
-        try:
-            await self._async_send([power(False)])
-            self.async_write_ha_state()
-        except HomeAssistantError as err:
-            _LOGGER.debug("Power off for %s failed: %s", self._address, err)
+        self._async_queue_send([power(False)])
 
     async def async_update(self) -> None:
         """Read the real state occasionally, e.g. after changes made elsewhere.
@@ -266,24 +257,42 @@ class GoveeH6010Light(LightEntity):
             self._state_replies[frame[1]] = frame
             self._state_event.set()
 
-    async def _async_send(self, frames: list[bytes]) -> None:
-        """Write frames over a reused connection, retrying once on failure."""
+    def _async_queue_send(self, frames: list[bytes]) -> None:
+        """Return to HA immediately; do the radio work in the background."""
         self._last_command = time.monotonic()
+        task = self.hass.async_create_task(self._async_send(frames))
+        self._pending.add(task)
+        task.add_done_callback(self._pending.discard)
+        task.add_done_callback(self._log_send_result)
+
+    @staticmethod
+    def _log_send_result(task: asyncio.Task) -> None:
+        if task.cancelled():
+            return
+        if err := task.exception():
+            _LOGGER.debug("Govee BLE command failed: %s", err)
+
+    async def _async_send(self, frames: list[bytes]) -> None:
+        """Write frames, retrying on the same link before reconnecting."""
         for attempt in range(2):
-            client = await self._async_client()
             try:
+                client = await self._async_client()
                 async with self._io_lock:
                     for frame in frames:
                         await client.write_gatt_char(
                             self._write_char or WRITE_UUID, frame, response=False
                         )
                 return
+            except HomeAssistantError as err:
+                _LOGGER.debug("No link for %s: %s", self._address, err)
+                return
             except (BleakError, TimeoutError, OSError) as err:
+                if attempt == 0:
+                    continue
                 await self._async_disconnect(force=True)
-                if attempt:
-                    raise HomeAssistantError(
-                        f"Failed to write to {self._address}: {err}"
-                    ) from err
+                raise HomeAssistantError(
+                    f"Failed to write to {self._address}: {err}"
+                ) from err
 
     async def _async_client(self) -> BleakClient:
         """Return a connected client, opening one only when necessary."""
@@ -363,6 +372,8 @@ class GoveeH6010Light(LightEntity):
 
     async def async_will_remove_from_hass(self) -> None:
         """Release the BLE connection when the entity is removed."""
+        for task in list(self._pending):
+            task.cancel()
         await self._async_disconnect()
 
 

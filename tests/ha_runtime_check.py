@@ -21,11 +21,17 @@ def mock_hass():
     hass = MagicMock()
 
     def create_task(coro):
-        coro.close()
-        return MagicMock()
+        return asyncio.create_task(coro)
 
     hass.async_create_task = create_task
     return hass
+
+
+async def drain(entity) -> None:
+    """Wait for the background BLE writes queued by service calls."""
+    while entity._pending:
+        await asyncio.gather(*list(entity._pending))
+        await asyncio.sleep(0)
 
 from bleak.backends.device import BLEDevice
 from bleak.backends.scanner import AdvertisementData
@@ -182,7 +188,9 @@ async def test_light() -> list[str]:
     entity.async_write_ha_state = lambda: None
 
     await entity.async_turn_on(brightness=186, rgb_color=(255, 0, 0))
+    await drain(entity)
     await entity.async_turn_on(color_temp_kelvin=5900)
+    await drain(entity)
     entity._last_command = 0.0  # simulate a poll well after the last command
     await entity.async_update()
     assert entity.is_on is True, entity.is_on
@@ -190,6 +198,7 @@ async def test_light() -> list[str]:
     assert entity.rgb_color == (255, 0, 0), entity.rgb_color
     print("POLL RESULT:", entity.is_on, entity.brightness, entity.rgb_color)
     await entity.async_turn_off()
+    await drain(entity)
 
     # A stale status reply must not undo a just-sent colour.
     entity._state_replies = {
@@ -231,6 +240,7 @@ async def test_failed_connect_keeps_state() -> None:
     entity.async_write_ha_state = lambda: None
     entity._async_client = AsyncMock(side_effect=HomeAssistantError("link busy"))
     await entity.async_turn_on(rgb_color=(0, 255, 0))
+    await drain(entity)
     assert entity.rgb_color == (0, 255, 0), entity.rgb_color
     print("FAILED CONNECT KEEPS STATE:", entity.rgb_color)
 
@@ -243,6 +253,7 @@ async def test_fresh_power_on_ignores_stale_off_reply() -> None:
     )
     entity.async_write_ha_state = lambda: None
     await entity.async_turn_on()
+    await drain(entity)
     assert entity.is_on is True, entity.is_on
     entity._state_replies = {
         0x01: bytes.fromhex("aa010000000000000000000000000000000000ab"),
@@ -252,10 +263,52 @@ async def test_fresh_power_on_ignores_stale_off_reply() -> None:
     print("FRESH POWER ON KEPT:", entity.is_on)
 
 
+async def test_service_returns_before_radio_write() -> None:
+    gate = asyncio.Event()
+
+    class SlowClient:
+        def __init__(self, *args, **kwargs):
+            self.services = []
+
+        @property
+        def is_connected(self):
+            return True
+
+        async def connect(self):
+            pass
+
+        async def disconnect(self):
+            pass
+
+        async def start_notify(self, *args):
+            pass
+
+        async def stop_notify(self, *args):
+            pass
+
+        async def write_gatt_char(self, *args, **kwargs):
+            await gate.wait()
+
+    light_mod.async_ble_device_from_address = lambda *args, **kwargs: object()
+    light_mod.BleakClient = SlowClient
+    entity = light_mod.GoveeH6010Light(
+        mock_hass(), "11:22:33:44:55:66", "H6008 latency", "entry4", "H6008"
+    )
+    entity.async_write_ha_state = lambda: None
+    started = asyncio.get_running_loop().time()
+    await entity.async_turn_on(rgb_color=(0, 255, 0))
+    elapsed = asyncio.get_running_loop().time() - started
+    assert elapsed < 0.1, elapsed
+    gate.set()
+    await drain(entity)
+    print("SERVICE RETURN MS:", round(elapsed * 1000, 1))
+
+
 async def main() -> None:
     test_manifest_matchers()
     await test_failed_connect_keeps_state()
     await test_fresh_power_on_ignores_stale_off_reply()
+    await test_service_returns_before_radio_write()
     entry = await test_config_flow()
     print("AUTODISCOVERY:", entry)
     frames = await test_light()
