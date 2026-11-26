@@ -130,6 +130,8 @@ class GoveeH6010Light(LightEntity):
         self._keepalive_task: asyncio.Task | None = None
         self._last_command = 0.0
         self._pending: set[asyncio.Task] = set()
+        self._queued: dict[tuple[int, int], bytes] = {}
+        self._worker: asyncio.Task | None = None
 
     async def async_added_to_hass(self) -> None:
         """Open the connection early so the first control is not delayed."""
@@ -139,6 +141,7 @@ class GoveeH6010Light(LightEntity):
         await asyncio.sleep(2)
         try:
             await self._async_client()
+            await self.async_update()
         except HomeAssistantError:
             pass
 
@@ -263,12 +266,24 @@ class GoveeH6010Light(LightEntity):
             self._state_event.set()
 
     def _async_queue_send(self, frames: list[bytes]) -> None:
-        """Return to HA immediately; do the radio work in the background."""
+        """Return to HA immediately and coalesce rapid repeated commands."""
         self._last_command = time.monotonic()
-        task = self.hass.async_create_task(self._async_send(frames))
-        self._pending.add(task)
-        task.add_done_callback(self._pending.discard)
-        task.add_done_callback(self._log_send_result)
+        for frame in frames:
+            # One pending frame per command type. Dragging a slider or tapping
+            # colours repeatedly then sends only the final requested value.
+            self._queued[(frame[0], frame[1])] = frame
+        if self._worker is None or self._worker.done():
+            self._worker = self.hass.async_create_task(self._async_send_queued())
+            self._pending.add(self._worker)
+            self._worker.add_done_callback(self._pending.discard)
+            self._worker.add_done_callback(self._log_send_result)
+
+    async def _async_send_queued(self) -> None:
+        """Drain the queue, letting newly arrived commands join the next batch."""
+        while self._queued:
+            frames = list(self._queued.values())
+            self._queued.clear()
+            await self._async_send(frames)
 
     @staticmethod
     def _log_send_result(task: asyncio.Task) -> None:
@@ -394,6 +409,7 @@ class GoveeH6010Light(LightEntity):
 
     async def async_will_remove_from_hass(self) -> None:
         """Release the BLE connection when the entity is removed."""
+        self._queued.clear()
         for task in list(self._pending):
             task.cancel()
         await self._async_disconnect()

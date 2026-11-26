@@ -94,6 +94,10 @@ Power is held for the same window, so a stale off reply cannot make a light you
 just switched on flip back off. External changes made in that minute are
 picked up at the next poll afterwards.
 
+Rapid repeated commands are coalesced by command type: dragging a brightness
+slider sends only the final value rather than queuing one write per step. The
+entity also reads the light's real state once shortly after startup.
+
 Both models use the same 20-byte command dialect. H6008 was verified from a
 captured session with two lights (desk and floor lamp, firmware 1.00.69): the
 app sends `33 04 <percent>` for brightness, `33 05 0d <R G B>` for color and

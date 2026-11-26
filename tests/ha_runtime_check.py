@@ -310,11 +310,56 @@ async def test_service_returns_before_radio_write() -> None:
     print("SERVICE RETURN MS:", round(elapsed * 1000, 1))
 
 
+async def test_rapid_commands_coalesce() -> None:
+    gate = asyncio.Event()
+    written: list[bytes] = []
+
+    class GatedClient:
+        def __init__(self, *args, **kwargs):
+            self.services = []
+
+        @property
+        def is_connected(self):
+            return True
+
+        async def connect(self):
+            pass
+
+        async def disconnect(self):
+            pass
+
+        async def start_notify(self, *args):
+            pass
+
+        async def stop_notify(self, *args):
+            pass
+
+        async def write_gatt_char(self, char, frame, response=False):
+            await gate.wait()
+            written.append(bytes(frame))
+
+    light_mod.async_ble_device_from_address = lambda *args, **kwargs: object()
+    light_mod.BleakClient = GatedClient
+    entity = light_mod.GoveeH6010Light(
+        mock_hass(), "11:22:33:44:55:66", "coalesce", "entry5", "H6008"
+    )
+    entity.async_write_ha_state = lambda: None
+    await entity.async_turn_on(brightness=100)
+    await entity.async_turn_on(brightness=200)
+    assert len(entity._queued) == 2, entity._queued
+    assert entity._queued[(0x33, 0x04)] == protocol.brightness(78), entity._queued
+    gate.set()
+    await drain(entity)
+    assert written == [protocol.power(True), protocol.brightness(78)], written
+    print("COALESCED FRAMES:", len(written), written[0].hex())
+
+
 async def main() -> None:
     test_manifest_matchers()
     await test_failed_connect_keeps_state()
     await test_fresh_power_on_ignores_stale_off_reply()
     await test_service_returns_before_radio_write()
+    await test_rapid_commands_coalesce()
     entry = await test_config_flow()
     print("AUTODISCOVERY:", entry)
     frames = await test_light()
